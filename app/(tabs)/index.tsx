@@ -34,17 +34,17 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     if (user?.id) {
-      fetchTransactions(user.id);
+      fetchTransactions(user.id, profile?.app_mode === 'business' ? 'business' : 'personal');
       fetchBudgets(user.id);
       fetchGoals(user.id);
     }
-  }, [user?.id]);
+  }, [user?.id, profile?.app_mode]);
 
   const onRefresh = async () => {
     if (!user?.id) return;
     setRefreshing(true);
     await Promise.all([
-      fetchTransactions(user.id),
+      fetchTransactions(user.id, profile?.app_mode === 'business' ? 'business' : 'personal'),
       fetchBudgets(user.id),
       fetchGoals(user.id),
     ]);
@@ -87,6 +87,55 @@ export default function DashboardScreen() {
 
   const activeGoal = goals.find((g) => !g.is_completed);
 
+  const isBusinessMode = profile?.app_mode === 'business';
+
+  // Top income sources for business mode
+  const topIncomeSources = useMemo(() => {
+    if (!isBusinessMode) return [];
+    const now = new Date();
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const incomeTx = transactions.filter(
+      (t) => new Date(t.date) >= firstDayOfMonth && t.category === 'Income'
+    );
+    // Group by description
+    const byDesc: Record<string, number> = {};
+    incomeTx.forEach((t) => {
+      const key = t.description.slice(0, 40);
+      byDesc[key] = (byDesc[key] ?? 0) + t.amount;
+    });
+    return Object.entries(byDesc)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5);
+  }, [transactions, isBusinessMode]);
+
+  const netProfit = stats.totalIncome - stats.totalSpent;
+
+  // Business Health Score Calculation
+  const healthScore = useMemo(() => {
+    if (!isBusinessMode || stats.totalIncome === 0) return { score: 0, grade: 'N/A', message: 'Record sales to see your score.', color: Colors.textMuted };
+    
+    const margin = netProfit / stats.totalIncome;
+    let marginScore = margin >= 0.3 ? 50 : margin >= 0.15 ? 30 : margin > 0 ? 10 : 0;
+    
+    // Activity scoring proxy
+    const incomeTxCount = transactions.filter(t => t.category === 'Income' && new Date(t.date).getMonth() === new Date().getMonth()).length;
+    const volumeScore = Math.min(incomeTxCount * 5, 30);
+    
+    const cashflowScore = netProfit > 0 ? 20 : 0;
+    
+    const totalScore = marginScore + volumeScore + cashflowScore;
+    
+    let grade = 'Needs Work';
+    let message = 'Monitor expenses closely. Margins are negative.';
+    let color = '#FF6B6B'; // danger
+    
+    if (totalScore >= 80) { grade = 'Excellent'; message = 'Highly profitable! Keep it up.'; color = Colors.success; }
+    else if (totalScore >= 50) { grade = 'Healthy'; message = 'Good steady performance.'; color = Colors.business; }
+    else if (totalScore >= 30) { grade = 'Fair'; message = 'Margins are a bit tight this month.'; color = Colors.warning; }
+
+    return { score: totalScore, grade, message, color };
+  }, [stats, netProfit, isBusinessMode, transactions]);
+
   return (
     <ScrollView
       style={styles.container}
@@ -108,91 +157,237 @@ export default function DashboardScreen() {
         </Text>
       </View>
 
-      {/* Executive Summary Card */}
-      <LinearGradient
-        colors={[Colors.surfaceElevated, Colors.surface]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.summaryCard}
-      >
-        <Ionicons name="wallet-outline" size={24} color="rgba(255,255,255,0.4)" style={styles.summaryBgIcon} />
-        <Text style={styles.summaryLabel}>Spent this month</Text>
-        <Text style={styles.summaryAmount}>
-          {formatCurrency(stats.totalSpent, currency)}
-        </Text>
-        {stats.totalIncome > 0 && (
-          <View style={styles.incomeRow}>
-            <Text style={styles.incomeLabel}>Income: </Text>
-            <Text style={styles.incomeAmount}>
-              {formatCurrency(stats.totalIncome, currency)}
-            </Text>
+      {isBusinessMode ? (
+        <>
+          {/* ===== BUSINESS MODE P&L CARD ===== */}
+          <LinearGradient
+            colors={['rgba(6, 182, 212, 0.15)', Colors.surface]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.summaryCard, { borderColor: 'rgba(6, 182, 212, 0.2)', borderWidth: 1 }]}
+          >
+            <Ionicons name="briefcase-outline" size={24} color="rgba(255,255,255,0.4)" style={styles.summaryBgIcon} />
+            <Text style={styles.summaryLabel}>Net Profit this month</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={[styles.summaryAmount, netProfit < 0 && { color: '#FF6B6B' }]}>
+                {netProfit >= 0 ? '+' : ''}{formatCurrency(Math.abs(netProfit), currency)}
+              </Text>
+              <Text style={{ fontSize: 24, color: netProfit >= 0 ? Colors.success : '#FF6B6B' }}>
+                {netProfit >= 0 ? '▲' : '▼'}
+              </Text>
+            </View>
+
+            <View style={styles.plRow}>
+              <View style={styles.plItem}>
+                <Ionicons name="arrow-down-circle" size={16} color={Colors.success} />
+                <Text style={styles.plLabel}>Revenue</Text>
+                <Text style={[styles.plValue, { color: Colors.success }]}>
+                  {formatCurrency(stats.totalIncome, currency)}
+                </Text>
+              </View>
+              <View style={styles.plDivider} />
+              <View style={styles.plItem}>
+                <Ionicons name="arrow-up-circle" size={16} color="#FF6B6B" />
+                <Text style={styles.plLabel}>Expenses</Text>
+                <Text style={[styles.plValue, { color: '#FF6B6B' }]}>
+                  {formatCurrency(stats.totalSpent, currency)}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.summaryMeta}>
+              <Text style={styles.summaryMetaText}>
+                {stats.monthTx.length} expense{stats.monthTx.length !== 1 ? 's' : ''} this month
+              </Text>
+            </View>
+          </LinearGradient>
+
+          <View style={styles.quickActions}>
+            <TouchableOpacity
+              style={[styles.quickActionBtn, { borderColor: 'rgba(6, 182, 212, 0.3)' }]}
+              onPress={() => router.push({ pathname: '/(tabs)/add', params: { type: 'expense' } })}
+            >
+              <Ionicons name="arrow-up-circle-outline" size={20} color={Colors.danger} />
+              <Text style={styles.quickActionText}>Add Expense</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.quickActionBtn, { borderColor: 'rgba(6, 182, 212, 0.3)' }]}
+              onPress={() => router.push({ pathname: '/(tabs)/add', params: { type: 'income' } })}
+            >
+              <Ionicons name="arrow-down-circle-outline" size={20} color={Colors.business} />
+              <Text style={[styles.quickActionText, { color: Colors.business }]}>Record Sale</Text>
+            </TouchableOpacity>
           </View>
-        )}
-        <View style={styles.summaryMeta}>
-          <Text style={styles.summaryMetaText}>
-            {stats.monthTx.length} transaction{stats.monthTx.length !== 1 ? 's' : ''}
-          </Text>
-        </View>
-      </LinearGradient>
 
-      {/* Quick Actions */}
-      <View style={styles.quickActions}>
-        <TouchableOpacity
-          style={styles.quickActionBtn}
-          onPress={() => router.push('/(tabs)/add')}
-        >
-          <Ionicons name="arrow-up-circle-outline" size={20} color={Colors.danger} />
-          <Text style={styles.quickActionText}>Add Expense</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.quickActionBtn}
-          onPress={() => router.push('/(tabs)/add')}
-        >
-          <Ionicons name="arrow-down-circle-outline" size={20} color={Colors.success} />
-          <Text style={[styles.quickActionText, { color: Colors.success }]}>Add Income</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Top Categories */}
-      {stats.sortedCategories.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Top Categories</Text>
-          <View style={styles.categoriesCard}>
-            {stats.sortedCategories.map(([cat, amount]) => {
-              const pct =
-                stats.totalSpent > 0
-                  ? Math.round((amount / stats.totalSpent) * 100)
-                  : 0;
-              return (
-                <View key={cat} style={styles.categoryRow}>
-                  <View style={[styles.iconCircle, { backgroundColor: `${CATEGORY_COLORS[cat as Category] ?? Colors.primary}20` }]}>
-                    <Ionicons name={CATEGORY_ICONS[cat as Category] as any ?? 'ellipse-outline'} size={20} color={CATEGORY_COLORS[cat as Category] ?? Colors.primary} />
-                  </View>
-                  <View style={styles.categoryInfo}>
-                    <View style={styles.categoryHeader}>
-                      <Text style={styles.categoryName}>{cat}</Text>
-                      <Text style={styles.categoryAmount}>
-                        {formatCurrency(amount, currency)}
-                      </Text>
+          {/* Top Income Sources */}
+          {topIncomeSources.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Top Income Sources</Text>
+              <View style={styles.categoriesCard}>
+                {topIncomeSources.map(([desc, amount]) => (
+                  <View key={desc} style={styles.categoryRow}>
+                    <View style={[styles.iconCircle, { backgroundColor: `${Colors.business}20` }]}>
+                      <Ionicons name="cash-outline" size={20} color={Colors.business} />
                     </View>
-                    <View style={styles.progressTrack}>
-                      <View
-                        style={[
-                          styles.progressBar,
-                          {
-                            width: `${pct}%`,
-                            backgroundColor:
-                              CATEGORY_COLORS[cat as Category] ?? Colors.primary,
-                          },
-                        ]}
-                      />
+                    <View style={styles.categoryInfo}>
+                      <View style={styles.categoryHeader}>
+                        <Text style={styles.categoryName} numberOfLines={1}>{desc}</Text>
+                        <Text style={[styles.categoryAmount, { color: Colors.business }]}>
+                          +{formatCurrency(amount, currency)}
+                        </Text>
+                      </View>
+                      <View style={styles.progressTrack}>
+                        <View
+                          style={[
+                            styles.progressBar,
+                            {
+                              width: `${stats.totalIncome > 0 ? Math.round((amount / stats.totalIncome) * 100) : 0}%`,
+                              backgroundColor: Colors.business,
+                            },
+                          ]}
+                        />
+                      </View>
                     </View>
                   </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Top Expense Categories (Business) */}
+          {stats.sortedCategories.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Top Expenses</Text>
+              <View style={styles.categoriesCard}>
+                {stats.sortedCategories.map(([cat, amount]) => {
+                  const pct = stats.totalSpent > 0 ? Math.round((amount / stats.totalSpent) * 100) : 0;
+                  return (
+                    <View key={cat} style={styles.categoryRow}>
+                      <View style={[styles.iconCircle, { backgroundColor: `${CATEGORY_COLORS[cat as Category] ?? Colors.primary}20` }]}>
+                        <Ionicons name={CATEGORY_ICONS[cat as Category] as any ?? 'ellipse-outline'} size={20} color={CATEGORY_COLORS[cat as Category] ?? Colors.primary} />
+                      </View>
+                      <View style={styles.categoryInfo}>
+                        <View style={styles.categoryHeader}>
+                          <Text style={styles.categoryName}>{cat}</Text>
+                          <Text style={styles.categoryAmount}>{formatCurrency(amount, currency)}</Text>
+                        </View>
+                        <View style={styles.progressTrack}>
+                          <View style={[styles.progressBar, { width: `${pct}%`, backgroundColor: CATEGORY_COLORS[cat as Category] ?? Colors.primary }]} />
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {/* Business Health Score */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Business Health Score</Text>
+            <View style={styles.healthCard}>
+              <View style={styles.healthTop}>
+                <View style={[styles.healthScoreCircle, { borderColor: healthScore.color }]}>
+                  <Text style={[styles.healthScoreNum, { color: healthScore.color }]}>{healthScore.score}</Text>
+                  <Text style={styles.healthScoreTotal}>/100</Text>
                 </View>
-              );
-            })}
+                <View style={styles.healthInfo}>
+                  <Text style={[styles.healthGrade, { color: healthScore.color }]}>{healthScore.grade}</Text>
+                  <Text style={styles.healthMessage}>{healthScore.message}</Text>
+                </View>
+              </View>
+            </View>
           </View>
-        </View>
+        </>
+      ) : (
+        <>
+          {/* ===== PERSONAL MODE (unchanged) ===== */}
+          <LinearGradient
+            colors={[Colors.surfaceElevated, Colors.surface]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.summaryCard}
+          >
+            <Ionicons name="wallet-outline" size={24} color="rgba(255,255,255,0.4)" style={styles.summaryBgIcon} />
+            <Text style={styles.summaryLabel}>Spent this month</Text>
+            <Text style={styles.summaryAmount}>
+              {formatCurrency(stats.totalSpent, currency)}
+            </Text>
+            {stats.totalIncome > 0 && (
+              <View style={styles.incomeRow}>
+                <Text style={styles.incomeLabel}>Income: </Text>
+                <Text style={styles.incomeAmount}>
+                  {formatCurrency(stats.totalIncome, currency)}
+                </Text>
+              </View>
+            )}
+            <View style={styles.summaryMeta}>
+              <Text style={styles.summaryMetaText}>
+                {stats.monthTx.length} transaction{stats.monthTx.length !== 1 ? 's' : ''}
+              </Text>
+            </View>
+          </LinearGradient>
+
+          {/* Quick Actions */}
+          <View style={styles.quickActions}>
+            <TouchableOpacity
+              style={styles.quickActionBtn}
+              onPress={() => router.push('/(tabs)/add')}
+            >
+              <Ionicons name="arrow-up-circle-outline" size={20} color={Colors.danger} />
+              <Text style={styles.quickActionText}>Add Expense</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.quickActionBtn}
+              onPress={() => router.push('/(tabs)/add')}
+            >
+              <Ionicons name="arrow-down-circle-outline" size={20} color={Colors.success} />
+              <Text style={[styles.quickActionText, { color: Colors.success }]}>Add Income</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Top Categories */}
+          {stats.sortedCategories.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Top Categories</Text>
+              <View style={styles.categoriesCard}>
+                {stats.sortedCategories.map(([cat, amount]) => {
+                  const pct =
+                    stats.totalSpent > 0
+                      ? Math.round((amount / stats.totalSpent) * 100)
+                      : 0;
+                  return (
+                    <View key={cat} style={styles.categoryRow}>
+                      <View style={[styles.iconCircle, { backgroundColor: `${CATEGORY_COLORS[cat as Category] ?? Colors.primary}20` }]}>
+                        <Ionicons name={CATEGORY_ICONS[cat as Category] as any ?? 'ellipse-outline'} size={20} color={CATEGORY_COLORS[cat as Category] ?? Colors.primary} />
+                      </View>
+                      <View style={styles.categoryInfo}>
+                        <View style={styles.categoryHeader}>
+                          <Text style={styles.categoryName}>{cat}</Text>
+                          <Text style={styles.categoryAmount}>
+                            {formatCurrency(amount, currency)}
+                          </Text>
+                        </View>
+                        <View style={styles.progressTrack}>
+                          <View
+                            style={[
+                              styles.progressBar,
+                              {
+                                width: `${pct}%`,
+                                backgroundColor:
+                                  CATEGORY_COLORS[cat as Category] ?? Colors.primary,
+                              },
+                            ]}
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+        </>
       )}
 
       {/* Budget Health */}
@@ -340,23 +535,24 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   greeting: {
-    fontSize: 16,
+    fontSize: 14,
     color: Colors.textSecondary,
-    letterSpacing: -0.2,
+    marginBottom: 4,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    fontWeight: '600',
   },
   userName: {
-    fontSize: 28,
+    fontSize: 34,
     fontWeight: '800',
     color: Colors.textPrimary,
-    marginTop: 4,
-    letterSpacing: -1,
+    letterSpacing: -1.5,
   },
   summaryCard: {
-    borderRadius: 24,
-    padding: 24,
+    borderRadius: 32,
+    padding: 28,
     marginBottom: 32,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    position: 'relative',
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 12 },
@@ -378,11 +574,11 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   summaryAmount: {
-    fontSize: 40,
+    fontSize: 48,
     fontWeight: '800',
-    color: Colors.white,
-    marginTop: 8,
-    letterSpacing: -1.5,
+    color: Colors.textPrimary,
+    marginBottom: 8,
+    letterSpacing: -2,
   },
   incomeRow: {
     flexDirection: 'row',
@@ -605,5 +801,75 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.textPrimary,
     letterSpacing: -0.2,
+  },
+  // Business mode P&L styles
+  plRow: {
+    flexDirection: 'row',
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  plItem: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  plLabel: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    fontWeight: '500',
+  },
+  plValue: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  plDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: Colors.border,
+  },
+  healthCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  healthTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 20,
+  },
+  healthScoreCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'column',
+  },
+  healthScoreNum: {
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 32,
+  },
+  healthScoreTotal: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    fontWeight: '600',
+  },
+  healthInfo: {
+    flex: 1,
+  },
+  healthGrade: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 4,
+    letterSpacing: -0.5,
+  },
+  healthMessage: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    lineHeight: 20,
   },
 });

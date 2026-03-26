@@ -1,25 +1,26 @@
-// SpendWise Design System — Colour Tokens
+// SpendWise Design System — Premium OLED Dark Theme
 export const Colors = {
   // Brand & Action
-  primary: '#4F46E5',    // Sophisticated deep indigo
-  secondary: '#10B981',  // Muted emerald
+  primary: '#6366F1',    // Electric Indigo (Personal Mode Action)
+  secondary: '#10B981',  // Neon Emerald (Money flows / Success)
+  business: '#F59E0B',   // Premium Amber Gold (Business Mode Action)
 
-  // Backgrounds & Surfaces (Obsidian/Slate Theme)
-  background: '#09090B',       // OLED Black depth
-  surface: '#121214',          // Subtly elevated cards
-  surfaceElevated: '#1A1A1D',  // Higher elevation (modals)
-  border: 'rgba(255, 255, 255, 0.08)', // Barely visible glass strokes
+  // Backgrounds & Surfaces (OLED True Black Theme)
+  background: '#000000',       // True OLED Black
+  surface: '#0F0F0F',          // Barely elevated surface
+  surfaceElevated: '#171717',  // Higher elevation (modals, active states)
+  border: '#262626',           // Crisp, subtle borders
 
   // Typography Hierarchy
-  textPrimary: '#FAFAFA',      // High-contrast clean white
-  textSecondary: '#A1A1AA',    // Muted slate for structure
-  textMuted: '#71717A',        // Deeply muted for meta-info
-  textTertiary: '#52525B',     // Background hints
+  textPrimary: '#FFFFFF',      // Pure white for maximum contrast
+  textSecondary: '#A3A3A3',    // Neutral gray for readability
+  textMuted: '#525252',        // Deeply muted for meta-info
+  textTertiary: '#404040',     // Background hints
 
-  // Semantics (Muted vs Neon)
-  danger: '#EF4444',     // Matte Red
+  // Semantics
+  danger: '#EF4444',     // Bright Red
   warning: '#F59E0B',    // Amber Gold
-  warningWarningText: '#D97706', // High contrast overlay warning
-  success: '#10B981',    // Matte Emerald
+  warningWarningText: '#D97706',
+  success: '#10B981',    
   white: '#FFFFFF',
 };

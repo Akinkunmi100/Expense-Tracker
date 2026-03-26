@@ -15,6 +15,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useBudgetStore } from '../../store/budgetStore';
 import { useTransactionStore } from '../../store/transactionStore';
 import { CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS, Category } from '../../constants/Categories';
+import { BUSINESS_EXPENSE_CATEGORIES, BUSINESS_CATEGORY_ICONS, BUSINESS_CATEGORY_COLORS, BusinessCategory } from '../../constants/BusinessCategories';
 import { formatCurrency } from '../../utils/categorize';
 
 export default function BudgetsScreen() {
@@ -22,9 +23,11 @@ export default function BudgetsScreen() {
   const { budgets, addBudget, deleteBudget } = useBudgetStore();
   const { transactions } = useTransactionStore();
   const currency = profile?.currency ?? 'NGN';
+  const isBusinessMode = profile?.app_mode === 'business';
+  const accentColor = isBusinessMode ? Colors.business : Colors.primary;
 
   const [showModal, setShowModal] = useState(false);
-  const [newCategory, setNewCategory] = useState<Category | null>(null);
+  const [newCategory, setNewCategory] = useState<Category | BusinessCategory | null>(null);
   const [newLimit, setNewLimit] = useState('');
 
   const handleAdd = async () => {
@@ -41,7 +44,7 @@ export default function BudgetsScreen() {
 
     await addBudget(
       {
-        category: newCategory,
+        category: newCategory as any,
         limit_amount: limit,
         period: 'monthly',
         start_date: new Date().toISOString().split('T')[0],
@@ -65,7 +68,7 @@ export default function BudgetsScreen() {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Page Title */}
-        <Text style={styles.pageTitle}>Budgets</Text>
+        <Text style={styles.pageTitle}>{isBusinessMode ? 'Expense Budgets' : 'Budgets'}</Text>
 
         {/* Budget Alerts */}
         {budgets.length > 0 && (() => {
@@ -110,8 +113,8 @@ export default function BudgetsScreen() {
 
         {budgets.length === 0 ? (
           <View style={styles.emptyState}>
-            <Ionicons name="wallet-outline" size={64} color={Colors.textTertiary} style={styles.emptyIcon} />
-            <Text style={styles.emptyTitle}>No Operating Budgets</Text>
+            <Ionicons name={isBusinessMode ? 'calculator-outline' : 'wallet-outline'} size={64} color={Colors.textTertiary} style={styles.emptyIcon} />
+            <Text style={styles.emptyTitle}>{isBusinessMode ? 'No Expense Budgets' : 'No Operating Budgets'}</Text>
             <Text style={styles.emptySubtitle}>
               Establish financial boundaries to monitor your burn rate
             </Text>
@@ -123,7 +126,12 @@ export default function BudgetsScreen() {
             const remaining = b.limit_amount - spent;
             const color =
               pct >= 100 ? Colors.danger : pct >= 80 ? Colors.warning : Colors.success;
-            const iconColor = CATEGORY_COLORS[b.category as Category] ?? Colors.primary;
+            const iconColor = isBusinessMode
+              ? (BUSINESS_CATEGORY_COLORS[b.category as BusinessCategory] ?? Colors.business)
+              : (CATEGORY_COLORS[b.category as Category] ?? Colors.primary);
+            const iconName = isBusinessMode
+              ? (BUSINESS_CATEGORY_ICONS[b.category as BusinessCategory] as any ?? 'ellipse-outline')
+              : (CATEGORY_ICONS[b.category as Category] as any ?? 'ellipse-outline');
 
             return (
               <TouchableOpacity
@@ -143,7 +151,7 @@ export default function BudgetsScreen() {
               >
                 <View style={styles.budgetHeader}>
                   <View style={[styles.iconCircle, { backgroundColor: `${iconColor}20` }]}>
-                    <Ionicons name={CATEGORY_ICONS[b.category as Category] as any ?? 'ellipse-outline'} size={24} color={iconColor} />
+                    <Ionicons name={iconName} size={24} color={iconColor} />
                   </View>
                   <View style={styles.budgetTitleArea}>
                     <Text style={styles.budgetCategory}>{b.category}</Text>
@@ -190,52 +198,58 @@ export default function BudgetsScreen() {
 
       {/* Add Budget FAB */}
       <TouchableOpacity
-        style={styles.fab}
+        style={[styles.fab, isBusinessMode && { backgroundColor: Colors.business, shadowColor: Colors.business }]}
         onPress={() => setShowModal(true)}
         activeOpacity={0.8}
       >
         <Ionicons name="add" size={20} color={Colors.white} />
-        <Text style={styles.fabText}>New Budget</Text>
+        <Text style={styles.fabText}>{isBusinessMode ? 'New Expense Budget' : 'New Budget'}</Text>
       </TouchableOpacity>
 
       {/* Add Budget Modal */}
       <Modal visible={showModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Establish Budget</Text>
+            <Text style={styles.modalTitle}>{isBusinessMode ? 'Set Expense Budget' : 'Establish Budget'}</Text>
 
-            <Text style={styles.label}>Allocation Category</Text>
+            <Text style={styles.label}>{isBusinessMode ? 'Cost Category' : 'Allocation Category'}</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               style={styles.categoryScroll}
             >
-              {CATEGORIES.filter((c) => c !== 'Income').map((cat) => {
-                const iconColor = CATEGORY_COLORS[cat as Category] ?? Colors.primary;
+              {(isBusinessMode ? BUSINESS_EXPENSE_CATEGORIES : CATEGORIES.filter((c) => c !== 'Income')).map((cat) => {
+                const iconColor = isBusinessMode
+                  ? (BUSINESS_CATEGORY_COLORS[cat as BusinessCategory] ?? Colors.business)
+                  : (CATEGORY_COLORS[cat as Category] ?? Colors.primary);
+                const iconName = isBusinessMode
+                  ? (BUSINESS_CATEGORY_ICONS[cat as BusinessCategory] as any ?? 'ellipse-outline')
+                  : (CATEGORY_ICONS[cat as Category] as any ?? 'ellipse-outline');
                 return (
-                <TouchableOpacity
-                  key={cat}
-                  style={[
-                    styles.catChip,
-                    newCategory === cat && styles.catChipActive,
-                  ]}
-                  onPress={() => setNewCategory(cat as Category)}
-                >
-                  <Ionicons 
-                    name={CATEGORY_ICONS[cat as Category] as any ?? 'ellipse-outline'} 
-                    size={16} 
-                    color={newCategory === cat ? Colors.white : iconColor} 
-                  />
-                  <Text
+                  <TouchableOpacity
+                    key={cat}
                     style={[
-                      styles.catChipText,
-                      newCategory === cat && styles.catChipTextActive,
+                      styles.catChip,
+                      newCategory === cat && [styles.catChipActive, isBusinessMode && { backgroundColor: Colors.business, borderColor: Colors.business }],
                     ]}
+                    onPress={() => setNewCategory(cat as any)}
                   >
-                    {cat}
-                  </Text>
-                </TouchableOpacity>
-              )})}
+                    <Ionicons
+                      name={iconName}
+                      size={16}
+                      color={newCategory === cat ? Colors.white : iconColor}
+                    />
+                    <Text
+                      style={[
+                        styles.catChipText,
+                        newCategory === cat && styles.catChipTextActive,
+                      ]}
+                    >
+                      {cat}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
 
             <Text style={styles.label}>Monthly Limit ({currency})</Text>
@@ -256,8 +270,8 @@ export default function BudgetsScreen() {
               >
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.saveBtn} onPress={handleAdd}>
-                <Text style={styles.saveText}>Authorize</Text>
+              <TouchableOpacity style={[styles.saveBtn, isBusinessMode && { backgroundColor: Colors.business }]} onPress={handleAdd}>
+                <Text style={styles.saveText}>{isBusinessMode ? 'Set Budget' : 'Authorize'}</Text>
               </TouchableOpacity>
             </View>
           </View>

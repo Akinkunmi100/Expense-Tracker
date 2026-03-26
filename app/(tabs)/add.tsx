@@ -10,29 +10,39 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Colors } from '../../constants/Colors';
 import { useAuthStore } from '../../store/authStore';
 import { useTransactionStore } from '../../store/transactionStore';
 import { CATEGORIES, CATEGORY_ICONS, Category } from '../../constants/Categories';
-import { categorizeTransaction } from '../../utils/categorize';
+import { BUSINESS_EXPENSE_CATEGORIES, BUSINESS_CATEGORY_ICONS, BusinessCategory } from '../../constants/BusinessCategories';
+import { categorizeTransaction, categorizeBusiness } from '../../utils/categorize';
 
 export default function AddExpenseScreen() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const params = useLocalSearchParams<{ type?: string }>();
+  const { user, profile } = useAuthStore();
   const { addTransaction } = useTransactionStore();
 
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState<Category | null>(null);
+  const [category, setCategory] = useState<Category | BusinessCategory | null>(null);
   const [notes, setNotes] = useState('');
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceInterval, setRecurrenceInterval] = useState<'weekly' | 'monthly' | 'yearly' | null>(null);
+  const [salesChannel, setSalesChannel] = useState<string | null>(null);
+  const [taxRate, setTaxRate] = useState('');
+  const [taxType, setTaxType] = useState<'VAT' | 'WHT'>('VAT');
+  const [type, setType] = useState<'expense' | 'income'>((params.type as any) === 'income' ? 'income' : 'expense');
   const [loading, setLoading] = useState(false);
 
+  const isBusinessMode = profile?.app_mode === 'business';
+  const accentColor = isBusinessMode ? Colors.business : Colors.primary;
+
   // Auto-suggest category as user types
-  const suggestedCategory =
-    description.length > 2 ? categorizeTransaction(description) : null;
+  const suggestedCategory = description.length > 2
+    ? (isBusinessMode ? categorizeBusiness(description) : categorizeTransaction(description))
+    : null;
 
   const handleSave = async () => {
     if (!description.trim() || !amount.trim()) {
@@ -48,25 +58,36 @@ export default function AddExpenseScreen() {
 
     setLoading(true);
     try {
-      const finalCategory = category ?? suggestedCategory ?? 'Other';
+      const isIncome = type === 'income';
+      const finalCategory = isIncome
+        ? (isBusinessMode ? 'Sales & Revenue' : 'Income')
+        : (category ?? (isBusinessMode ? 'Miscellaneous' : (suggestedCategory ?? 'Other')));
       await addTransaction(
         {
           description: description.trim(),
-          amount: parsedAmount,
-          category: finalCategory,
+          amount: isIncome ? parsedAmount : parsedAmount, // Both are positive in our storage, categorized as Income vs Expense logic is handled in stats
+          category: finalCategory as any,
           date: new Date().toISOString().split('T')[0],
           payment_method: null,
           is_recurring: isRecurring,
           recurrence_interval: isRecurring ? recurrenceInterval : null,
+          sales_channel: isIncome && isBusinessMode ? salesChannel : null,
+          tax_amount: parseFloat(taxRate) ? (parsedAmount * parseFloat(taxRate)) / 100 : 0,
+          tax_rate: parseFloat(taxRate) || 0,
+          tax_type: taxType,
           notes: notes.trim() || null,
         },
-        user.id
+        user.id,
+        profile?.app_mode === 'business' ? 'business' : 'personal'
       );
       Alert.alert('Success ✅', 'Transaction added!');
       // Reset form
       setDescription('');
       setAmount('');
       setCategory(null);
+      setSalesChannel(null);
+      setTaxRate('');
+      setTaxType('VAT');
       setNotes('');
       setIsRecurring(false);
       setRecurrenceInterval(null);
@@ -87,6 +108,30 @@ export default function AddExpenseScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {/* Type Toggle */}
+        <View style={styles.typeToggle}>
+           <TouchableOpacity 
+            style={[styles.typeBtn, type === 'expense' && styles.typeBtnActiveExpense]}
+            onPress={() => setType('expense')}
+           >
+             <Text style={[styles.typeBtnText, type === 'expense' && styles.typeBtnTextActive]}>Expense</Text>
+           </TouchableOpacity>
+           <TouchableOpacity 
+            style={[
+              styles.typeBtn, 
+              type === 'income' && (profile?.app_mode === 'business' ? styles.typeBtnActiveBusiness : styles.typeBtnActiveIncome)
+            ]}
+            onPress={() => {
+              setType('income');
+              setCategory('Income');
+            }}
+           >
+             <Text style={[styles.typeBtnText, type === 'income' && styles.typeBtnTextActive]}>
+               {profile?.app_mode === 'business' ? 'Sale / Income' : 'Income'}
+             </Text>
+           </TouchableOpacity>
+        </View>
+
         {/* Amount Input — Big and Bold */}
         <View style={styles.amountSection}>
           <Text style={styles.currencySymbol}>₦</Text>
@@ -102,56 +147,99 @@ export default function AddExpenseScreen() {
 
         {/* Description */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>What was it for?</Text>
+          <Text style={styles.label}>{isBusinessMode ? 'Item / Service Description' : 'What was it for?'}</Text>
           <TextInput
             style={styles.input}
-            placeholder="e.g. Uber to work, Lunch at Dominos"
+            placeholder={isBusinessMode ? 'e.g. Paid supplier for rice bags' : 'e.g. Uber to work, Lunch at Dominos'}
             placeholderTextColor={Colors.textMuted}
             value={description}
             onChangeText={setDescription}
           />
           {suggestedCategory && !category && (
             <TouchableOpacity
-              style={styles.suggestion}
-              onPress={() => setCategory(suggestedCategory)}
+              style={[styles.suggestion, isBusinessMode && { borderColor: `${Colors.business}40`, borderWidth: 1 }]}
+              onPress={() => setCategory(suggestedCategory as any)}
             >
-              <Text style={styles.suggestionText}>
-                💡 Suggested: {CATEGORY_ICONS[suggestedCategory]}{' '}
-                {suggestedCategory}
+              <Text style={[styles.suggestionText, isBusinessMode && { color: Colors.business }]}>
+                💡 Suggested: {suggestedCategory}
               </Text>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Category Picker */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Category</Text>
-          <View style={styles.categoryGrid}>
-            {CATEGORIES.map((cat) => (
-              <TouchableOpacity
-                key={cat}
-                style={[
-                  styles.categoryChip,
-                  category === cat && styles.categoryChipActive,
-                ]}
-                onPress={() => setCategory(cat)}
-              >
-                <Text style={styles.categoryChipIcon}>
-                  {CATEGORY_ICONS[cat]}
-                </Text>
-                <Text
+        {/* Category Picker (Only for Expenses) */}
+        {type === 'expense' && (
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>{isBusinessMode ? 'Cost Category' : 'Category'}</Text>
+            <View style={styles.categoryGrid}>
+              {(isBusinessMode ? BUSINESS_EXPENSE_CATEGORIES : CATEGORIES.filter(c => c !== 'Income')).map((cat) => (
+                <TouchableOpacity
+                  key={cat}
                   style={[
-                    styles.categoryChipText,
-                    category === cat && styles.categoryChipTextActive,
+                    styles.categoryChip,
+                    category === cat && (isBusinessMode ? { backgroundColor: Colors.business, borderColor: Colors.business } : styles.categoryChipActive),
                   ]}
-                  numberOfLines={1}
+                  onPress={() => setCategory(cat as any)}
                 >
-                  {cat}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Text style={styles.categoryChipText} numberOfLines={1}>{cat}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
-        </View>
+        )}
+
+        {/* Sales Channel Picker (Only for Business Income) */}
+        {type === 'income' && isBusinessMode && (
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Sales Channel (optional)</Text>
+            <View style={styles.categoryGrid}>
+              {['In-Person', 'WhatsApp', 'Instagram', 'Marketplace', 'Website', 'Bank Transfer'].map((channel) => (
+                <TouchableOpacity
+                  key={channel}
+                  style={[
+                    styles.categoryChip,
+                    salesChannel === channel && { backgroundColor: Colors.business, borderColor: Colors.business },
+                  ]}
+                  onPress={() => setSalesChannel(channel === salesChannel ? null : channel)}
+                >
+                  <Text style={[styles.categoryChipText, salesChannel === channel && styles.categoryChipTextActive]} numberOfLines={1}>{channel}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Tax Input (Business Mode Only) */}
+        {isBusinessMode && (
+          <View style={styles.inputGroup}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <Text style={styles.label}>Tax Type</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {['VAT', 'WHT'].map(t => (
+                    <TouchableOpacity 
+                      key={t}
+                      style={[styles.categoryChip, { flex: 1 }, taxType === t && { backgroundColor: Colors.business, borderColor: Colors.business }]}
+                      onPress={() => setTaxType(t as any)}
+                    >
+                      <Text style={[styles.categoryChipText, taxType === t && styles.categoryChipTextActive]}>{t}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Tax Rate (%)</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="0"
+                  keyboardType="decimal-pad"
+                  value={taxRate}
+                  onChangeText={setTaxRate}
+                />
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Notes */}
         <View style={styles.inputGroup}>
@@ -175,7 +263,10 @@ export default function AddExpenseScreen() {
           }}
         >
           <View
-            style={[styles.checkbox, isRecurring && styles.checkboxActive]}
+            style={[
+              styles.checkbox, 
+              isRecurring && (profile?.app_mode === 'business' ? { backgroundColor: Colors.business, borderColor: Colors.business } : styles.checkboxActive)
+            ]}
           >
             {isRecurring && <Text style={styles.checkmark}>✓</Text>}
           </View>
@@ -190,7 +281,7 @@ export default function AddExpenseScreen() {
                 key={interval}
                 style={[
                   styles.intervalPill,
-                  recurrenceInterval === interval && styles.intervalPillActive,
+                  recurrenceInterval === interval && (profile?.app_mode === 'business' ? { backgroundColor: Colors.business, borderColor: Colors.business } : styles.intervalPillActive),
                 ]}
                 onPress={() => setRecurrenceInterval(interval)}
               >
@@ -209,13 +300,17 @@ export default function AddExpenseScreen() {
 
         {/* Save Button */}
         <TouchableOpacity
-          style={[styles.saveButton, loading && styles.saveDisabled]}
+          style={[
+            styles.saveButton, 
+            profile?.app_mode === 'business' && { backgroundColor: Colors.business },
+            loading && styles.saveDisabled
+          ]}
           onPress={handleSave}
           disabled={loading}
           activeOpacity={0.8}
         >
           <Text style={styles.saveText}>
-            {loading ? 'Saving...' : 'Add Transaction'}
+            {loading ? 'Saving...' : (type === 'income' ? (profile?.app_mode === 'business' ? 'Record Sale' : 'Add Income') : 'Add Expense')}
           </Text>
         </TouchableOpacity>
       </ScrollView>
@@ -385,5 +480,37 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 17,
     fontWeight: '700',
+  },
+  // Type Toggle
+  typeToggle: {
+    flexDirection: 'row',
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 24,
+    gap: 4,
+  },
+  typeBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  typeBtnActiveExpense: {
+    backgroundColor: Colors.danger,
+  },
+  typeBtnActiveIncome: {
+    backgroundColor: Colors.success,
+  },
+  typeBtnActiveBusiness: {
+    backgroundColor: Colors.business,
+  },
+  typeBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  typeBtnTextActive: {
+    color: Colors.white,
   },
 });

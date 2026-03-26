@@ -3,23 +3,29 @@ import { Text, View, StyleSheet, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
+import { useAuthStore } from '../../store/authStore';
 
 interface TabIconProps {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   focused: boolean;
+  isBusiness?: boolean;
 }
 
-function TabIcon({ icon, label, focused }: TabIconProps) {
+function TabIcon({ icon, label, focused, isBusiness }: TabIconProps) {
+  const activeColor = isBusiness ? Colors.business : Colors.primary;
   return (
     <View style={styles.tabItem}>
       <Ionicons 
         name={icon} 
         size={22} 
-        color={focused ? Colors.primary : Colors.textMuted} 
+        color={focused ? activeColor : Colors.textMuted} 
       />
       <Text
-        style={[styles.tabLabel, focused && styles.tabLabelActive]}
+        style={[
+          styles.tabLabel, 
+          focused && { color: activeColor, fontWeight: '700' }
+        ]}
         numberOfLines={1}
       >
         {label}
@@ -29,6 +35,9 @@ function TabIcon({ icon, label, focused }: TabIconProps) {
 }
 
 export default function TabLayout() {
+  const { profile } = useAuthStore();
+  const isBusinessMode = profile?.app_mode === 'business';
+
   return (
     <Tabs
       screenOptions={{
@@ -60,44 +69,73 @@ export default function TabLayout() {
           />
         ),
         tabBarShowLabel: false,
-        tabBarActiveTintColor: Colors.primary,
+        tabBarActiveTintColor: isBusinessMode ? Colors.business : Colors.primary,
         tabBarInactiveTintColor: Colors.textMuted,
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Dashboard',
+          title: isBusinessMode ? 'Business Overview' : 'Dashboard',
           tabBarIcon: ({ focused }) => (
-            <TabIcon icon={focused ? "home" : "home-outline"} label="Home" focused={focused} />
+            <TabIcon
+              icon={focused ? (isBusinessMode ? 'bar-chart' : 'home') : (isBusinessMode ? 'bar-chart-outline' : 'home-outline')}
+              label={isBusinessMode ? 'Overview' : 'Home'}
+              focused={focused}
+              isBusiness={isBusinessMode}
+            />
           ),
         }}
       />
       <Tabs.Screen
         name="transactions"
         options={{
-          title: 'Transactions',
+          title: isBusinessMode ? 'Business Ledger' : 'Transactions',
           tabBarIcon: ({ focused }) => (
-            <TabIcon icon={focused ? "swap-vertical" : "swap-vertical-outline"} label="Tx" focused={focused} />
+            <TabIcon
+              icon={focused ? (isBusinessMode ? 'receipt' : 'swap-vertical') : (isBusinessMode ? 'receipt-outline' : 'swap-vertical-outline')}
+              label={isBusinessMode ? 'Ledger' : 'Tx'}
+              focused={focused}
+              isBusiness={isBusinessMode}
+            />
           ),
         }}
       />
       <Tabs.Screen
         name="analytics"
         options={{
-          title: 'Analytics',
+          title: isBusinessMode ? 'Business Reports' : 'Analytics',
+          href: isBusinessMode ? '/(tabs)/analytics' : '/(tabs)/analytics',
           tabBarIcon: ({ focused }) => (
-            <TabIcon icon={focused ? "pie-chart" : "pie-chart-outline"} label="Data" focused={focused} />
+            <TabIcon
+              icon={focused ? (isBusinessMode ? 'trending-up' : 'pie-chart') : (isBusinessMode ? 'trending-up-outline' : 'pie-chart-outline')}
+              label={isBusinessMode ? 'Reports' : 'Data'}
+              focused={focused}
+              isBusiness={isBusinessMode}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="customers"
+        options={{
+          title: 'Customers',
+          href: isBusinessMode ? '/(tabs)/customers' : null,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon icon={focused ? 'people' : 'people-outline'} label="Clients" focused={focused} isBusiness={isBusinessMode} />
           ),
         }}
       />
       <Tabs.Screen
         name="add"
         options={{
-          title: 'Add Expense',
+          title: isBusinessMode ? 'Record Transaction' : 'Add Expense',
           tabBarIcon: ({ focused }) => (
             <View style={styles.addButtonContainer}>
-              <View style={styles.addButton}>
+              <View style={[
+                styles.addButton,
+                isBusinessMode && { backgroundColor: Colors.business, shadowColor: Colors.business }
+              ]}>
                 <Ionicons name="add" size={28} color={Colors.white} />
               </View>
             </View>
@@ -108,8 +146,29 @@ export default function TabLayout() {
         name="budgets"
         options={{
           title: 'Budgets',
+          href: !isBusinessMode ? '/(tabs)/budgets' : null,
           tabBarIcon: ({ focused }) => (
-            <TabIcon icon={focused ? "wallet" : "wallet-outline"} label="Budget" focused={focused} />
+            <TabIcon
+              icon={focused ? 'wallet' : 'wallet-outline'}
+              label="Budget"
+              focused={focused}
+              isBusiness={false}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="invoices"
+        options={{
+          title: 'Invoices',
+          href: isBusinessMode ? '/(tabs)/invoices' : null,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon
+              icon={focused ? 'briefcase' : 'briefcase-outline'}
+              label="Invoices"
+              focused={focused}
+              isBusiness={true}
+            />
           ),
         }}
       />
@@ -118,7 +177,7 @@ export default function TabLayout() {
         options={{
           title: 'More',
           tabBarIcon: ({ focused }) => (
-            <TabIcon icon={focused ? "grid" : "grid-outline"} label="More" focused={focused} />
+            <TabIcon icon={focused ? 'grid' : 'grid-outline'} label="More" focused={focused} isBusiness={isBusinessMode} />
           ),
         }}
       />

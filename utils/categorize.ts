@@ -1,7 +1,8 @@
 import { KEYWORD_MAP, Category } from '../constants/Categories';
+import { BUSINESS_KEYWORD_MAP, BusinessCategory } from '../constants/BusinessCategories';
 
 /**
- * Rule-based transaction categorisation.
+ * Rule-based transaction categorisation (Personal mode).
  * Checks the description against the keyword map.
  * Returns 'Other' if no match is found.
  */
@@ -15,6 +16,23 @@ export function categorizeTransaction(description: string): Category {
   }
 
   return 'Other';
+}
+
+/**
+ * Rule-based transaction categorisation (Business mode).
+ * Checks the description against the business keyword map.
+ * Returns 'Miscellaneous' if no match is found.
+ */
+export function categorizeBusiness(description: string): BusinessCategory {
+  const lower = description.toLowerCase().trim();
+
+  for (const [keyword, category] of Object.entries(BUSINESS_KEYWORD_MAP)) {
+    if (lower.includes(keyword)) {
+      return category;
+    }
+  }
+
+  return 'Miscellaneous';
 }
 
 /**

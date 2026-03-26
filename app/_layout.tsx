@@ -40,6 +40,7 @@ export default function RootLayout() {
 
     const inAuthGroup = segments.length > 0 && segments[0] === '(auth)';
     const isProfileSetup = segments.length > 1 && segments[0] === '(auth)' && (segments as string[])[1] === 'profile-setup';
+    const isOnboarding = segments.length > 0 && segments[0] === 'onboarding';
 
     if (!session && !inAuthGroup) {
       // Not signed in → redirect to login
@@ -51,8 +52,11 @@ export default function RootLayout() {
       } else if (profile && !profile.income_type && !isProfileSetup) {
         // Signed in but profile incomplete → redirect to setup
         router.replace('/(auth)/profile-setup');
-      } else if (profile && profile.income_type && inAuthGroup) {
-        // Signed in and complete → redirect to main app
+      } else if (profile && profile.income_type && !profile.has_onboarded && !isOnboarding) {
+        // Signed in and profile complete, but not onboarded → redirect to onboarding
+        router.replace('/onboarding');
+      } else if (profile && profile.income_type && profile.has_onboarded && (inAuthGroup || isOnboarding)) {
+        // Signed in, complete, and onboarded → redirect to main app
         router.replace('/(tabs)');
       }
     }

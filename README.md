@@ -1,6 +1,6 @@
-# 💸 SpendWise — Expense Tracker & Planner
+# 💸 SpendWise — Dual-Mode Tracker & Planner
 
-A cross-platform personal finance application (Web + Android + iOS) built with **Expo**, **React Native**, and **Supabase**. Designed for general consumers of all ages — from students managing allowances to professionals tracking monthly budgets.
+A cross-platform finance application (Web + Android + iOS) built with **Expo**, **React Native**, and **Supabase**. Designed as a **Dual-Mode** app: it seamlessly functions as a Personal Expense Tracker or a Professional Business/Vendor Ledger.
 
 ---
 
@@ -8,15 +8,16 @@ A cross-platform personal finance application (Web + Android + iOS) built with *
 
 | Feature | Description |
 |---|---|
+| 🎭 **Dual-Mode Architecture** | Switch instantly between **Personal Mode** and **Business Mode** (with distinct dashboards, KPIs, and flows). |
+| ✨ **Premium Aesthetics** | OLED True Dark mode with glassmorphism, glowing accents, and high-contrast typography. |
 | 🔐 Authentication | Email/password + Google OAuth via Supabase Auth |
-| 📊 Dashboard | Spending summary, top categories, budget health, goal progress & recent transactions |
-| ➕ Add Expense | Large-tap amount input, smart auto-categorization as you type, category grid picker |
-| 📋 Transactions | Searchable, filterable list with long-press delete |
-| 💰 Budget Manager | Create monthly category budgets with colour-coded progress bars |
-| 🎯 Goals | Create savings goals, track progress with contribution history |
-| 👤 Profile Setup | One-time onboarding to capture name, currency, and income type |
-| 🇳🇬 Nigerian Market Ready | NGN default currency, 150+ local keyword auto-categorization (Bolt, DSTV, IBEDC, etc.) |
-| 🌙 Dark Mode | Dark-first UI with a polished design system |
+| 📊 Dashboard | Dynamic KPIs: Net Profit & Health Score (Business) or Spend & Budgets (Personal). |
+| 📥 Invoicing (Pro) | Generate, manage, and download PDF invoices for clients. |
+| 📦 Inventory (Pro) | Track product stocks, margins, and low-stock alerts. |
+| ➕ Smart Input | Intelligent auto-categorization and multi-channel sales logging (WhatsApp, IG, Store). |
+| 📋 Transactions | Filterable list with tax (VAT/WHT) handling and bulk Archiving/Restore capabilities. |
+| 🎯 Goals & Budgets | Create savings goals and track monthly budgets with colour-coded progress bars. |
+| 👤 Smooth UX Onboarding | Dedicated welcome flow intercepting new users to configure their experience upfront. |
 
 ---
 
@@ -137,6 +138,8 @@ CREATE TABLE profiles (
   currency TEXT DEFAULT 'NGN',
   monthly_income NUMERIC(12,2),
   display_mode TEXT DEFAULT 'detailed' CHECK (display_mode IN ('simple','detailed')),
+  app_mode TEXT DEFAULT 'personal' CHECK (app_mode IN ('personal','business')),
+  has_onboarded BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -149,7 +152,13 @@ CREATE TABLE transactions (
   category TEXT NOT NULL,
   date DATE NOT NULL DEFAULT CURRENT_DATE,
   is_recurring BOOLEAN DEFAULT FALSE,
+  transaction_mode TEXT DEFAULT 'personal' CHECK (transaction_mode IN ('personal','business')),
+  sales_channel TEXT,
+  tax_amount NUMERIC(12,2) DEFAULT 0,
+  tax_rate NUMERIC(5,2) DEFAULT 0,
+  tax_type TEXT CHECK (tax_type IN ('VAT', 'WHT')),
   notes TEXT,
+  is_archived BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

@@ -58,6 +58,9 @@ const TransactionCard = ({ item, currency, onPress, onLongPress }: TransactionCa
           </Text>
           <Text style={styles.txMeta}>
             {item.category} · {getRelativeDate(item.date)}
+            {item.source === 'mono' && (
+              <Text style={styles.bankBadge}> · 🏦 Bank</Text>
+            )}
           </Text>
           {item.notes ? (
             <View style={styles.txNotesContainer}>
@@ -90,6 +93,7 @@ export default memo(TransactionCard, (prev, next) => {
     prev.item.category === next.item.category &&
     prev.item.date === next.item.date &&
     prev.item.notes === next.item.notes &&
+    prev.item.source === next.item.source &&
     prev.currency === next.currency
   );
 });
@@ -149,5 +153,10 @@ const styles = StyleSheet.create({
     fontSize: 16, 
     fontWeight: '700',
     letterSpacing: -0.5,
+  },
+  bankBadge: {
+    fontSize: 11,
+    color: Colors.secondary,
+    fontWeight: '700',
   },
 });

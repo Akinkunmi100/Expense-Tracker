@@ -14,6 +14,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useTransactionStore } from '../../store/transactionStore';
 import { useBudgetStore } from '../../store/budgetStore';
 import { CATEGORY_ICONS, CATEGORY_COLORS, Category } from '../../constants/Categories';
+import { BUSINESS_CATEGORY_ICONS, BUSINESS_CATEGORY_COLORS, BusinessCategory } from '../../constants/BusinessCategories';
 import { formatCurrency } from '../../utils/categorize';
 import {
   Period,
@@ -21,6 +22,7 @@ import {
   getCategoryBreakdown,
   getBudgetVsActual,
   getPeriodSummary,
+  getDateRange,
 } from '../../utils/analytics';
 import { Skeleton } from '../../components/SkeletonLoader';
 
@@ -45,6 +47,8 @@ export default function AnalyticsScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const currency = profile?.currency ?? 'NGN';
+  const isBusinessMode = profile?.app_mode === 'business';
+  const accentColor = isBusinessMode ? Colors.business : Colors.primary;
 
   const onRefresh = async () => {
     if (!user?.id) return;
@@ -87,27 +91,69 @@ export default function AnalyticsScreen() {
     return Colors.success;
   };
 
+  // Channel breakdown
+  const channelBreakdown = useMemo(() => {
+    if (!isBusinessMode) return [];
+    
+    const { start, end } = getDateRange(period);
+    const incomeThisPeriod = transactions.filter((t) => {
+      const d = new Date(t.date);
+      return d >= start && d <= end && ((t.category as string) === 'Sales & Revenue' || t.category === 'Income') && t.sales_channel;
+    });
+
+    const byChannel: Record<string, number> = {};
+    incomeThisPeriod.forEach(t => {
+      byChannel[t.sales_channel!] = (byChannel[t.sales_channel!] ?? 0) + t.amount;
+    });
+
+    const total = incomeThisPeriod.reduce((s, t) => s + t.amount, 0);
+
+    return Object.entries(byChannel)
+      .map(([channel, amount]) => ({
+        channel,
+        amount,
+        percentage: total > 0 ? Math.round((amount / total) * 100) : 0,
+      }))
+      .sort((a,b) => b.amount - a.amount);
+  }, [transactions, period, isBusinessMode]);
+
+  // Tax breakdown
+  const taxSummary = useMemo(() => {
+    if (!isBusinessMode) return { vat: 0, wht: 0 };
+    
+    const { start, end } = getDateRange(period);
+    const txInPeriod = transactions.filter((t) => {
+      const d = new Date(t.date);
+      return d >= start && d <= end;
+    });
+
+    return {
+      vat: txInPeriod.filter((t) => t.tax_type === 'VAT').reduce((s, t) => s + (t.tax_amount || 0), 0),
+      wht: txInPeriod.filter((t) => t.tax_type === 'WHT').reduce((s, t) => s + (t.tax_amount || 0), 0),
+    };
+  }, [transactions, period, isBusinessMode]);
+
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accentColor} />
       }
       showsVerticalScrollIndicator={false}
     >
       {/* Page Title */}
-      <Text style={styles.pageTitle}>Analytics</Text>
+      <Text style={styles.pageTitle}>{isBusinessMode ? 'Business Reports' : 'Analytics'}</Text>
 
       {/* Period Selector */}
       <View style={styles.periodRow}>
         {PERIODS.map((p) => (
           <Pressable
             key={p.value}
-            style={[styles.periodPill, period === p.value && styles.periodPillActive]}
+            style={[styles.periodPill, period === p.value && [styles.periodPillActive, isBusinessMode && { backgroundColor: `${Colors.business}30` }]]}
             onPress={() => setPeriod(p.value)}
           >
-            <Text style={[styles.periodText, period === p.value && styles.periodTextActive]}>
+            <Text style={[styles.periodText, period === p.value && [styles.periodTextActive, isBusinessMode && { color: Colors.business }]]}>
               {p.label}
             </Text>
           </Pressable>
@@ -115,32 +161,76 @@ export default function AnalyticsScreen() {
       </View>
 
       {/* Summary Stats */}
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Total Spent</Text>
-          <Text style={styles.statValue}>{formatCurrency(summary.totalSpent, currency)}</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Daily Avg</Text>
-          <Text style={styles.statValue}>{formatCurrency(Math.round(summary.avgPerDay), currency)}</Text>
-        </View>
-      </View>
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Transactions</Text>
-          <Text style={styles.statValue}>{summary.transactionCount}</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Highest</Text>
-          <Text style={styles.statValue}>{formatCurrency(summary.highestExpense, currency)}</Text>
-        </View>
-      </View>
+      {isBusinessMode ? (
+        // Business stats: Revenue / Net Profit / Margin
+        <>
+          <View style={styles.statsRow}>
+            <View style={[styles.statCard, { borderColor: `${Colors.business}30` }]}>
+              <Text style={styles.statLabel}>Revenue</Text>
+              <Text style={[styles.statValue, { color: Colors.business }]}>{formatCurrency(summary.totalIncome, currency)}</Text>
+            </View>
+            <View style={[styles.statCard, { borderColor: `${Colors.success}30` }]}>
+              <Text style={styles.statLabel}>Net Profit</Text>
+              <Text style={[styles.statValue, { color: summary.totalIncome - summary.totalSpent >= 0 ? Colors.success : Colors.danger }]}>
+                {summary.totalIncome - summary.totalSpent >= 0 ? '+' : ''}{formatCurrency(summary.totalIncome - summary.totalSpent, currency)}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Total Costs</Text>
+              <Text style={[styles.statValue, { color: Colors.danger }]}>{formatCurrency(summary.totalSpent, currency)}</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Profit Margin</Text>
+              <Text style={[styles.statValue, { color: Colors.business }]}>
+                {summary.totalIncome > 0 ? Math.round(((summary.totalIncome - summary.totalSpent) / summary.totalIncome) * 100) : 0}%
+              </Text>
+            </View>
+          </View>
+          {/* Tax Summaries */}
+          <View style={styles.statsRow}>
+            <View style={[styles.statCard, { paddingVertical: 12 }]}>
+              <Text style={styles.statLabel}>VAT Collected</Text>
+              <Text style={[styles.statValue, { fontSize: 16 }]}>{formatCurrency(taxSummary.vat, currency)}</Text>
+            </View>
+            <View style={[styles.statCard, { paddingVertical: 12 }]}>
+              <Text style={styles.statLabel}>WHT Deducted</Text>
+              <Text style={[styles.statValue, { fontSize: 16 }]}>{formatCurrency(taxSummary.wht, currency)}</Text>
+            </View>
+          </View>
+        </>
+      ) : (
+        // Personal stats
+        <>
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Total Spent</Text>
+              <Text style={styles.statValue}>{formatCurrency(summary.totalSpent, currency)}</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Daily Avg</Text>
+              <Text style={styles.statValue}>{formatCurrency(Math.round(summary.avgPerDay), currency)}</Text>
+            </View>
+          </View>
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Transactions</Text>
+              <Text style={styles.statValue}>{summary.transactionCount}</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Highest</Text>
+              <Text style={styles.statValue}>{formatCurrency(summary.highestExpense, currency)}</Text>
+            </View>
+          </View>
+        </>
+      )}
 
-      {/* Spending Trend Chart */}
+      {/* Spending / Revenue Trend Chart */}
       <View style={styles.section}>
         <View style={styles.sectionHeaderRow}>
-          <Ionicons name="stats-chart-outline" size={20} color={Colors.textPrimary} />
-          <Text style={styles.sectionTitle}>Spending Trend</Text>
+          <Ionicons name={isBusinessMode ? 'trending-up-outline' : 'stats-chart-outline'} size={20} color={isBusinessMode ? Colors.business : Colors.textPrimary} />
+          <Text style={styles.sectionTitle}>{isBusinessMode ? 'Revenue & Expense Trend' : 'Spending Trend'}</Text>
         </View>
         <View style={styles.chartCard}>
           <Suspense fallback={<View style={styles.emptyChart}><Skeleton width="100%" height={CHART_HEIGHT} borderRadius={16} /></View>}>
@@ -156,22 +246,27 @@ export default function AnalyticsScreen() {
       {/* Category Breakdown */}
       <View style={styles.section}>
         <View style={styles.sectionHeaderRow}>
-          <Ionicons name="pie-chart-outline" size={20} color={Colors.textPrimary} />
-          <Text style={styles.sectionTitle}>By Category</Text>
+          <Ionicons name="pie-chart-outline" size={20} color={isBusinessMode ? Colors.business : Colors.textPrimary} />
+          <Text style={styles.sectionTitle}>{isBusinessMode ? 'Cost Breakdown' : 'By Category'}</Text>
         </View>
         {categories.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="folder-open-outline" size={40} color={Colors.textTertiary} style={styles.emptyIcon} />
-            <Text style={styles.emptyText}>No expenses to categorize</Text>
+            <Text style={styles.emptyText}>{isBusinessMode ? 'No costs to analyse' : 'No expenses to categorize'}</Text>
           </View>
         ) : (
           <View style={styles.categoriesCard}>
             {categories.map((cat) => {
-              const iconColor = CATEGORY_COLORS[cat.category as Category] ?? Colors.primary;
+              const iconColor = isBusinessMode
+                ? (BUSINESS_CATEGORY_COLORS[cat.category as BusinessCategory] ?? Colors.business)
+                : (CATEGORY_COLORS[cat.category as Category] ?? Colors.primary);
+              const iconName = isBusinessMode
+                ? (BUSINESS_CATEGORY_ICONS[cat.category as BusinessCategory] as any ?? 'ellipse-outline')
+                : (CATEGORY_ICONS[cat.category as Category] as any ?? 'ellipse-outline');
               return (
               <View key={cat.category} style={styles.categoryRow}>
                 <View style={[styles.iconCircle, { backgroundColor: `${iconColor}20` }]}>
-                  <Ionicons name={CATEGORY_ICONS[cat.category as Category] as any ?? 'ellipse-outline'} size={20} color={iconColor} />
+                  <Ionicons name={iconName} size={20} color={iconColor} />
                 </View>
                 <View style={styles.categoryInfo}>
                   <View style={styles.categoryHeader}>
@@ -201,8 +296,8 @@ export default function AnalyticsScreen() {
         )}
       </View>
 
-      {/* Budget vs Actual */}
-      {budgetReport.length > 0 && (
+      {/* Budget vs Actual — only in personal mode */}
+      {!isBusinessMode && budgetReport.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Ionicons name="clipboard-outline" size={20} color={Colors.textPrimary} />
@@ -271,44 +366,75 @@ export default function AnalyticsScreen() {
         </View>
       )}
 
-      {/* Income vs Expense */}
+      {/* Sales by Channel */}
+      {isBusinessMode && channelBreakdown.length > 0 && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeaderRow}>
+            <Ionicons name="cart-outline" size={20} color={Colors.business} />
+            <Text style={styles.sectionTitle}>Sales by Channel</Text>
+          </View>
+          <View style={styles.categoriesCard}>
+            {channelBreakdown.map((ch) => (
+              <View key={ch.channel} style={styles.categoryRow}>
+                <View style={[styles.iconCircle, { backgroundColor: `${Colors.business}20` }]}>
+                  <Ionicons name="cart-outline" size={20} color={Colors.business} />
+                </View>
+                <View style={styles.categoryInfo}>
+                   <View style={styles.categoryHeader}>
+                     <Text style={styles.categoryName}>{ch.channel}</Text>
+                     <View style={styles.categoryRight}>
+                       <Text style={styles.categoryAmount}>{formatCurrency(ch.amount, currency)}</Text>
+                       <Text style={styles.categoryPct}>{ch.percentage}%</Text>
+                     </View>
+                   </View>
+                   <View style={styles.progressTrack}>
+                     <View style={[styles.progressBar, { width: `${ch.percentage}%`, backgroundColor: Colors.business }]} />
+                   </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+
+      {/* Revenue vs Costs / Income vs Expense */}
       {(summary.totalIncome > 0 || summary.totalSpent > 0) && (
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Ionicons name="swap-vertical-outline" size={20} color={Colors.textPrimary} />
-            <Text style={styles.sectionTitle}>Income vs Expenses</Text>
+            <Ionicons name="swap-vertical-outline" size={20} color={isBusinessMode ? Colors.business : Colors.textPrimary} />
+            <Text style={styles.sectionTitle}>{isBusinessMode ? 'Revenue vs Costs' : 'Income vs Expenses'}</Text>
           </View>
           <View style={styles.incomeExpenseCard}>
             <View style={styles.ieRow}>
               <View style={styles.ieLeft}>
-                <View style={[styles.ieDot, { backgroundColor: Colors.success }]} />
-                <Text style={styles.ieLabel}>Income</Text>
+                <View style={[styles.ieDot, { backgroundColor: isBusinessMode ? Colors.business : Colors.success }]} />
+                <Text style={styles.ieLabel}>{isBusinessMode ? 'Revenue' : 'Income'}</Text>
               </View>
-              <Text style={[styles.ieAmount, { color: Colors.success }]}>
+              <Text style={[styles.ieAmount, { color: isBusinessMode ? Colors.business : Colors.success }]}>
                 +{formatCurrency(summary.totalIncome, currency)}
               </Text>
             </View>
             <View style={styles.ieDivider} />
             <View style={styles.ieRow}>
               <View style={styles.ieLeft}>
-                <View style={[styles.ieDot, { backgroundColor: Colors.textSecondary }]} />
-                <Text style={styles.ieLabel}>Expenses</Text>
+                <View style={[styles.ieDot, { backgroundColor: Colors.danger }]} />
+                <Text style={styles.ieLabel}>{isBusinessMode ? 'Total Costs' : 'Expenses'}</Text>
               </View>
-              <Text style={[styles.ieAmount, { color: Colors.textPrimary }]}>
+              <Text style={[styles.ieAmount, { color: Colors.danger }]}>
                 -{formatCurrency(summary.totalSpent, currency)}
               </Text>
             </View>
             <View style={styles.ieDivider} />
             <View style={styles.ieRow}>
               <View style={styles.ieLeft}>
-                <View style={[styles.ieDot, { backgroundColor: Colors.primary }]} />
-                <Text style={[styles.ieLabel, { fontWeight: '700' }]}>Net</Text>
+                <View style={[styles.ieDot, { backgroundColor: isBusinessMode ? Colors.business : Colors.primary }]} />
+                <Text style={[styles.ieLabel, { fontWeight: '700' }]}>{isBusinessMode ? 'Net Profit' : 'Net'}</Text>
               </View>
               <Text
                 style={[
                   styles.ieAmount,
                   {
-                    color: summary.totalIncome - summary.totalSpent >= 0 ? Colors.success : Colors.textPrimary,
+                    color: summary.totalIncome - summary.totalSpent >= 0 ? Colors.success : Colors.danger,
                     fontWeight: '800',
                   },
                 ]}

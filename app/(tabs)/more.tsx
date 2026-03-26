@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,14 +9,19 @@ import {
   TextInput,
   Modal,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Colors } from '../../constants/Colors';
 import { useAuthStore } from '../../store/authStore';
 import { useGoalStore } from '../../store/goalStore';
 import { useTransactionStore } from '../../store/transactionStore';
 import { useBudgetStore } from '../../store/budgetStore';
+import { useMonoStore } from '../../store/monoStore';
 import { formatCurrency } from '../../utils/categorize';
 import { supabase } from '../../lib/supabase';
+import MonoConnectButton from '../../components/MonoConnectButton';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
 const showAlert = (title: string, msg: string) => {
   if (Platform.OS === 'web') {
@@ -27,10 +32,21 @@ const showAlert = (title: string, msg: string) => {
 };
 
 export default function MoreScreen() {
+  const router = useRouter();
   const { user, profile, signOut, fetchProfile } = useAuthStore();
   const { goals, addGoal, addContribution } = useGoalStore();
   const { transactions } = useTransactionStore();
   const { budgets } = useBudgetStore();
+  const {
+    linkedAccounts,
+    isLinking,
+    isSyncing,
+    syncingAccountId,
+    fetchLinkedAccounts,
+    linkAccount,
+    syncTransactions,
+    unlinkAccount,
+  } = useMonoStore();
   const currency = profile?.currency ?? 'NGN';
 
   // Goal modals
@@ -46,6 +62,63 @@ export default function MoreScreen() {
   const [editCurrency, setEditCurrency] = useState(profile?.currency ?? 'NGN');
   const [editIncomeType, setEditIncomeType] = useState(profile?.income_type ?? 'salary');
   const [settingsLoading, setSettingsLoading] = useState(false);
+
+  // Fetch linked accounts on mount
+  useEffect(() => {
+    if (user?.id) {
+      fetchLinkedAccounts(user.id);
+    }
+  }, [user?.id]);
+
+  const handleLinkSuccess = async (code: string) => {
+    try {
+      await linkAccount(code);
+      showAlert('Connected ✅', 'Bank account linked successfully!');
+    } catch (err: any) {
+      showAlert('Error', err.message ?? 'Failed to link bank account');
+    }
+  };
+
+  const handleSync = async (accountId: string) => {
+    try {
+      const currentMode = profile?.app_mode === 'business' ? 'business' : 'personal';
+      const result = await syncTransactions(accountId, currentMode);
+      if (result) {
+        showAlert(
+          'Synced ✅',
+          result.imported > 0
+            ? `Imported ${result.imported} new transaction${result.imported > 1 ? 's' : ''}!`
+            : 'All transactions are up to date.'
+        );
+        // Refresh transaction list
+        if (user?.id) {
+          useTransactionStore.getState().fetchTransactions(user.id, currentMode);
+        }
+      }
+    } catch (err: any) {
+      showAlert('Sync Error', err.message ?? 'Failed to sync transactions');
+    }
+  };
+
+  const handleUnlink = (accountId: string, bankName: string) => {
+    const doUnlink = async () => {
+      try {
+        await unlinkAccount(accountId);
+        showAlert('Unlinked', `${bankName ?? 'Account'} has been disconnected.`);
+      } catch (err: any) {
+        showAlert('Error', err.message ?? 'Failed to unlink account');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (globalThis.confirm(`Unlink ${bankName ?? 'this account'}?`)) doUnlink();
+    } else {
+      Alert.alert('Unlink Account', `Disconnect ${bankName ?? 'this account'}?`, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Unlink', style: 'destructive', onPress: doUnlink },
+      ]);
+    }
+  };
 
   const handleAddGoal = async () => {
     if (!goalName.trim() || !goalTarget.trim()) {
@@ -195,6 +268,74 @@ export default function MoreScreen() {
         </View>
       </View>
 
+      {/* Bank Accounts Section */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>🏦 Bank Accounts</Text>
+          {linkedAccounts.length > 0 && (
+            <Text style={styles.linkedCount}>
+              {linkedAccounts.length} linked
+            </Text>
+          )}
+        </View>
+
+        {/* Linked Accounts List */}
+        {linkedAccounts.map((account) => {
+          const isSyncingThis = isSyncing && syncingAccountId === account.id;
+          const lastSynced = account.last_synced_at
+            ? new Date(account.last_synced_at).toLocaleDateString('en-NG', {
+                day: 'numeric',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : 'Never';
+
+          return (
+            <View key={account.id} style={styles.bankCard}>
+              <View style={styles.bankCardHeader}>
+                <View style={styles.bankIcon}>
+                  <Text style={styles.bankIconText}>🏦</Text>
+                </View>
+                <View style={styles.bankInfo}>
+                  <Text style={styles.bankName}>
+                    {account.institution_name ?? 'Bank Account'}
+                  </Text>
+                  <Text style={styles.bankMeta}>
+                    {account.account_type ?? 'Account'} · Last synced: {lastSynced}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.bankActions}>
+                <TouchableOpacity
+                  style={[styles.syncBtn, isSyncingThis && { opacity: 0.6 }]}
+                  onPress={() => handleSync(account.id)}
+                  disabled={isSyncingThis}
+                >
+                  {isSyncingThis ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <Text style={styles.syncBtnText}>↻ Sync</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.unlinkBtn}
+                  onPress={() => handleUnlink(account.id, account.institution_name ?? 'Account')}
+                >
+                  <Text style={styles.unlinkBtnText}>Unlink</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })}
+
+        {/* Link New Account Button */}
+        <MonoConnectButton
+          onSuccess={handleLinkSuccess}
+          isLinking={isLinking}
+        />
+      </View>
+
       {/* Goals Section */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -240,7 +381,10 @@ export default function MoreScreen() {
                   </Text>
                   {!g.is_completed && (
                     <TouchableOpacity
-                      style={styles.contributeBtn}
+                      style={[
+                        styles.contributeBtn,
+                        profile?.app_mode === 'business' && { backgroundColor: Colors.business }
+                      ]}
                       onPress={() => setContributeGoalId(g.id)}
                     >
                       <Text style={styles.contributeBtnText}>+ Add</Text>
@@ -274,6 +418,56 @@ export default function MoreScreen() {
             </View>
           ))}
         </View>
+
+        {/* App Mode Toggle */}
+        <TouchableOpacity
+          style={styles.modeToggleBtn}
+          onPress={async () => {
+            if (!user?.id) return;
+            const newMode = profile?.app_mode === 'business' ? 'personal' : 'business';
+            await supabase
+              .from('profiles')
+              .update({ app_mode: newMode })
+              .eq('id', user.id);
+            fetchProfile(user.id);
+          }}
+        >
+          <View style={[
+            styles.modeToggleIcon,
+            profile?.app_mode === 'business' && styles.modeToggleIconBusiness
+          ]}>
+            <Text style={{ fontSize: 20 }}>
+              {profile?.app_mode === 'business' ? '👤' : '💼'}
+            </Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.modeToggleText}>
+              {profile?.app_mode === 'business'
+                ? 'Switch to Personal Mode'
+                : 'Switch to Business Mode'}
+            </Text>
+            <Text style={styles.modeToggleSub}>
+              Currently: {profile?.app_mode === 'business' ? '💼 Business' : '👤 Personal'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      {/* Data Management */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🗄️ Data Management</Text>
+        <TouchableOpacity 
+          style={styles.modeToggleBtn} // Reuse styling
+          onPress={() => router.push('/archived')}
+        >
+          <View style={styles.modeToggleIcon}>
+            <Ionicons name="archive-outline" size={20} color={Colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.modeToggleText}>Archived Data</Text>
+            <Text style={styles.modeToggleSub}>Restore or permanently delete hidden items</Text>
+          </View>
+        </TouchableOpacity>
       </View>
 
       {/* Export Data */}
@@ -394,7 +588,7 @@ export default function MoreScreen() {
                   key={t.value}
                   style={[
                     styles.incomeTypePill,
-                    editIncomeType === t.value && styles.incomeTypePillActive,
+                    editIncomeType === t.value && (profile?.app_mode === 'business' ? styles.incomeTypePillActiveBusiness : styles.incomeTypePillActive),
                   ]}
                   onPress={() => setEditIncomeType(t.value as any)}
                 >
@@ -418,12 +612,16 @@ export default function MoreScreen() {
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.saveBtn, settingsLoading && { opacity: 0.6 }]}
+                style={[
+                  styles.saveBtn,
+                  profile?.app_mode === 'business' && { backgroundColor: Colors.business },
+                  settingsLoading && { opacity: 0.7 }
+                ]}
                 onPress={handleSaveSettings}
                 disabled={settingsLoading}
               >
                 <Text style={styles.saveText}>
-                  {settingsLoading ? 'Saving...' : 'Save'}
+                  {settingsLoading ? 'Saving...' : 'Save Changes'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -525,7 +723,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceElevated, borderRadius: 10, paddingHorizontal: 12,
     paddingVertical: 8, borderWidth: 1, borderColor: Colors.border,
   },
-  incomeTypePillActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  incomeTypePillActive: { 
+    backgroundColor: Colors.primary, 
+    borderColor: Colors.primary 
+  },
+  incomeTypePillActiveBusiness: {
+    backgroundColor: Colors.business,
+    borderColor: Colors.business
+  },
   incomeTypeText: { fontSize: 13, color: Colors.textSecondary, fontWeight: '600' },
   incomeTypeTextActive: { color: Colors.white },
   modalActions: { flexDirection: 'row', gap: 12 },
@@ -533,4 +738,69 @@ const styles = StyleSheet.create({
   cancelText: { color: Colors.textSecondary, fontWeight: '600', fontSize: 15 },
   saveBtn: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: Colors.primary, alignItems: 'center' },
   saveText: { color: Colors.white, fontWeight: '700', fontSize: 15 },
+  // Bank Account Styles
+  linkedCount: { fontSize: 13, color: Colors.textMuted, fontWeight: '600' },
+  bankCard: {
+    backgroundColor: Colors.surface, borderRadius: 14, padding: 16,
+    marginBottom: 10, borderWidth: 1, borderColor: Colors.border,
+  },
+  bankCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  bankIcon: {
+    width: 44, height: 44, borderRadius: 12, backgroundColor: Colors.surfaceElevated,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  bankIconText: { fontSize: 22 },
+  bankInfo: { flex: 1 },
+  bankName: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  bankMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  bankActions: { flexDirection: 'row', gap: 8 },
+  syncBtn: {
+    flex: 1, backgroundColor: Colors.surfaceElevated, borderRadius: 10,
+    paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
+  },
+  syncBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  syncBtnTextBusiness: { fontSize: 13, fontWeight: '700', color: Colors.business },
+  unlinkBtn: {
+    paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10,
+    borderWidth: 1, borderColor: 'rgba(255,107,107,0.3)', backgroundColor: 'rgba(255,107,107,0.08)',
+  },
+  unlinkBtnText: { fontSize: 13, fontWeight: '600', color: Colors.danger },
+  // Mode toggle
+  modeToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modeToggleIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: `${Colors.primary}20`,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modeToggleIconBusiness: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: `${Colors.business}20`,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modeToggleText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  modeToggleSub: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
 });

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,10 +16,12 @@ import { Colors } from '../../constants/Colors';
 import { useAuthStore } from '../../store/authStore';
 import { useTransactionStore } from '../../store/transactionStore';
 import { CATEGORIES, CATEGORY_ICONS, Category } from '../../constants/Categories';
+import { BUSINESS_CATEGORIES, BUSINESS_CATEGORY_ICONS, BusinessCategory } from '../../constants/BusinessCategories';
 import { formatCurrency, getRelativeDate } from '../../utils/categorize';
-import { useFilteredTransactions, DateFilter } from '../../hooks/useFilteredTransactions';
+import { useFilteredTransactions, DateFilter, SourceFilter } from '../../hooks/useFilteredTransactions';
 import TransactionCard from '../../components/TransactionCard';
 import { TransactionSkeletonList } from '../../components/SkeletonLoader';
+import { Ionicons } from '@expo/vector-icons';
 
 const DATE_FILTERS: { value: DateFilter; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -27,6 +29,12 @@ const DATE_FILTERS: { value: DateFilter; label: string }[] = [
   { value: 'week', label: 'This Week' },
   { value: 'month', label: 'This Month' },
   { value: 'year', label: 'This Year' },
+];
+
+const SOURCE_FILTERS: { value: SourceFilter; label: string }[] = [
+  { value: 'all', label: 'All Sources' },
+  { value: 'manual', label: '✍️ Manual' },
+  { value: 'mono', label: '🏦 Bank' },
 ];
 
 const showAlert = (title: string, message: string) => {
@@ -38,13 +46,18 @@ const showAlert = (title: string, message: string) => {
 };
 
 export default function TransactionsScreen() {
-  const { profile } = useAuthStore();
-  const { transactions, isLoading, updateTransaction, deleteTransaction } = useTransactionStore();
+  const { user, profile } = useAuthStore();
+  const { transactions, isLoading, updateTransaction, deleteTransaction, fetchTransactions, bulkArchiveTransactions, bulkDeleteTransactions } = useTransactionStore();
   const currency = profile?.currency ?? 'NGN';
 
   const [search, setSearch] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<Category | 'All'>('All');
+  const [selectedCategory, setSelectedCategory] = useState<Category | BusinessCategory | 'All'>('All');
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [salesChannelFilter, setSalesChannelFilter] = useState<string | 'All'>('All');
+
+  const isBusinessMode = profile?.app_mode === 'business';
+  const accentColor = isBusinessMode ? Colors.business : Colors.primary;
 
   // Edit modal state
   const [editTx, setEditTx] = useState<typeof transactions[0] | null>(null);
@@ -54,12 +67,32 @@ export default function TransactionsScreen() {
   const [editNotes, setEditNotes] = useState('');
   const [editLoading, setEditLoading] = useState(false);
 
+  // Clear data state
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [clearPeriod, setClearPeriod] = useState<DateFilter>('month');
+  const [clearLoading, setClearLoading] = useState(false);
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchTransactions(user.id, profile?.app_mode === 'business' ? 'business' : 'personal');
+    }
+  }, [user?.id, profile?.app_mode]);
+
   const openEdit = (tx: typeof transactions[0]) => {
     setEditTx(tx);
     setEditDesc(tx.description);
     setEditAmount(tx.amount.toString());
     setEditCategory(tx.category);
     setEditNotes(tx.notes ?? '');
+  };
+
+  const onRefresh = async () => {
+    if (!user?.id) return;
+    setRefreshing(true);
+    await fetchTransactions(user.id, profile?.app_mode === 'business' ? 'business' : 'personal');
+    setRefreshing(false);
   };
 
   const handleSaveEdit = async () => {
@@ -107,25 +140,85 @@ export default function TransactionsScreen() {
     }
   };
 
+  const handleClear = async (action: 'archive' | 'delete') => {
+    if (!user?.id) return;
+    try {
+      setClearLoading(true);
+      
+      const now = new Date();
+      let start: Date;
+      let end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      
+      switch (clearPeriod) {
+        case 'today':
+          start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case 'week': {
+          const day = now.getDay();
+          const mondayOffset = day === 0 ? 6 : day - 1;
+          start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset);
+          break;
+        }
+        case 'month':
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+        case 'year':
+          start = new Date(now.getFullYear(), 0, 1);
+          break;
+        case 'all':
+        default:
+          start = new Date(2000, 0, 1); // effectively all time
+          break;
+      }
+      
+      const mode = profile?.app_mode === 'business' ? 'business' : 'personal';
+
+      if (action === 'archive') {
+        await bulkArchiveTransactions(user.id, start, end, mode);
+        showAlert('Archived', `Transactions for the selected period have been archived.`);
+      } else {
+        await bulkDeleteTransactions(user.id, start, end, mode);
+        showAlert('Deleted', `Transactions for the selected period have been permanently deleted.`);
+      }
+      
+      setShowClearModal(false);
+      onRefresh();
+    } catch (error: any) {
+      showAlert('Error', error.message || 'Failed to clear data.');
+    } finally {
+      setClearLoading(false);
+    }
+  };
+
   const { filtered, totalFilteredSpent } = useFilteredTransactions(
     transactions,
     search,
     selectedCategory,
-    dateFilter
+    dateFilter,
+    sourceFilter,
+    salesChannelFilter === 'All' ? null : salesChannelFilter
   );
 
   return (
     <View style={styles.container}>
-      {/* Search */}
-      <View style={styles.searchBar}>
-        <Text style={styles.searchIcon}>🔍</Text>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search transactions..."
-          placeholderTextColor={Colors.textMuted}
-          value={search}
-          onChangeText={setSearch}
-        />
+      {/* Search & Actions */}
+      <View style={styles.headerRow}>
+        <View style={styles.searchBar}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search transactions..."
+            placeholderTextColor={Colors.textMuted}
+            value={search}
+            onChangeText={setSearch}
+          />
+        </View>
+        <Pressable 
+          style={styles.clearDataBtn}
+          onPress={() => setShowClearModal(true)}
+        >
+          <Ionicons name="trash-bin-outline" size={20} color={Colors.textSecondary} />
+        </Pressable>
       </View>
 
       {/* Date Filter Pills */}
@@ -143,20 +236,62 @@ export default function TransactionsScreen() {
         ))}
       </ScrollView>
 
+      {/* Source Filter Pills */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sourceFilterRow}>
+        {SOURCE_FILTERS.map((f) => (
+          <Pressable
+            key={f.value}
+            style={[styles.sourcePill, sourceFilter === f.value && styles.sourcePillActive]}
+            onPress={() => setSourceFilter(f.value)}
+          >
+            <Text style={[styles.sourcePillText, sourceFilter === f.value && styles.sourcePillTextActive]}>
+              {f.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
+      {/* Sales Channel Filter Pills (Business Mode Only) */}
+      {isBusinessMode && selectedCategory === 'Sales & Revenue' && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sourceFilterRow}>
+          {['All', 'In-Person', 'WhatsApp', 'Instagram', 'Marketplace', 'Website', 'Bank Transfer'].map((channel) => (
+            <Pressable
+              key={channel}
+              style={[styles.sourcePill, salesChannelFilter === channel && { backgroundColor: Colors.business, borderColor: Colors.business }]}
+              onPress={() => setSalesChannelFilter(channel as any)}
+            >
+              <Text style={[styles.sourcePillText, salesChannelFilter === channel && { color: Colors.white }]}>
+                {channel === 'All' ? 'All Channels' : channel}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
+
       {/* Category Filter Chips */}
       <FlatList
-        data={['All', ...CATEGORIES] as (Category | 'All')[]}
+        data={isBusinessMode
+          ? (['All', ...BUSINESS_CATEGORIES] as (BusinessCategory | 'All')[])
+          : (['All', ...CATEGORIES] as (Category | 'All')[])}
         horizontal
         showsHorizontalScrollIndicator={false}
         keyExtractor={(item) => item}
         contentContainerStyle={styles.chipRow}
         renderItem={({ item }) => (
           <Pressable
-            style={[styles.chip, selectedCategory === item && styles.chipActive]}
-            onPress={() => setSelectedCategory(item)}
+            style={[
+              styles.chip, 
+              selectedCategory === item && [styles.chipActive, isBusinessMode && { backgroundColor: Colors.business, borderColor: Colors.business }]
+            ]}
+            onPress={() => setSelectedCategory(item as any)}
           >
             <Text style={[styles.chipText, selectedCategory === item && styles.chipTextActive]}>
-              {item === 'All' ? '📊 All' : `${CATEGORY_ICONS[item]} ${item}`}
+              {item === 'All'
+                ? '📊 All'
+                : isBusinessMode
+                  ? `${item}`
+                  : `${CATEGORY_ICONS[item as Category]} ${item}`
+              }
             </Text>
           </Pressable>
         )}
@@ -176,6 +311,8 @@ export default function TransactionsScreen() {
         <TransactionSkeletonList count={7} />
       ) : (
         <FlatList
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           data={filtered}
           keyExtractor={(item) => item.id}
           showsVerticalScrollIndicator={false}
@@ -286,20 +423,82 @@ export default function TransactionsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Clear Data Modal */}
+      <Modal visible={showClearModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={styles.modalTitle}>Clear Data</Text>
+              <Pressable onPress={() => setShowClearModal(false)}>
+                <Ionicons name="close" size={24} color={Colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.label}>Select Timeframe</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 }}>
+              {DATE_FILTERS.map((f) => (
+                <Pressable
+                  key={f.value}
+                  style={[styles.datePill, clearPeriod === f.value && styles.datePillActive]}
+                  onPress={() => setClearPeriod(f.value)}
+                >
+                  <Text style={[styles.datePillText, clearPeriod === f.value && styles.datePillTextActive]}>
+                    {f.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Choose Action</Text>
+            <View style={{ gap: 12 }}>
+              <Pressable
+                style={[styles.archiveBtn, clearLoading && { opacity: 0.6 }]}
+                onPress={() => handleClear('archive')}
+                disabled={clearLoading}
+              >
+                <Ionicons name="archive-outline" size={20} color={Colors.white} />
+                <View>
+                  <Text style={styles.archiveText}>Archive Data</Text>
+                  <Text style={styles.archiveSubText}>Hide from reports, but you can restore later.</Text>
+                </View>
+              </Pressable>
+              
+              <Pressable
+                style={[styles.permanentlyDeleteBtn, clearLoading && { opacity: 0.6 }]}
+                onPress={() => handleClear('delete')}
+                disabled={clearLoading}
+              >
+                <Ionicons name="trash-outline" size={20} color={Colors.danger} />
+                <View>
+                  <Text style={styles.permanentlyDeleteText}>Permanently Delete</Text>
+                  <Text style={styles.permanentlyDeleteSubText}>Cannot be undone.</Text>
+                </View>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  headerRow: { flexDirection: 'row', alignItems: 'center', paddingRight: 16, marginBottom: 8 },
   searchBar: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface,
-    borderRadius: 12, margin: 16, marginBottom: 8, paddingHorizontal: 14,
+    flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface,
+    borderRadius: 12, marginVertical: 16, marginLeft: 16, marginRight: 8, paddingHorizontal: 14,
     borderWidth: 1, borderColor: Colors.border,
   },
   searchIcon: { fontSize: 16, marginRight: 8 },
   searchInput: { flex: 1, height: 44, fontSize: 15, color: Colors.textPrimary },
+  clearDataBtn: {
+    width: 44, height: 44, borderRadius: 12, backgroundColor: Colors.surface,
+    borderWidth: 1, borderColor: Colors.border, alignItems: 'center', justifyContent: 'center',
+  },
   dateFilterRow: { paddingHorizontal: 16, marginBottom: 4, maxHeight: 40 },
+  sourceFilterRow: { paddingHorizontal: 16, marginBottom: 4, maxHeight: 40 },
   datePill: {
     backgroundColor: Colors.surface, borderRadius: 20, paddingHorizontal: 14,
     paddingVertical: 7, marginRight: 8, borderWidth: 1, borderColor: Colors.border,
@@ -307,6 +506,13 @@ const styles = StyleSheet.create({
   datePillActive: { backgroundColor: Colors.secondary, borderColor: Colors.secondary },
   datePillText: { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
   datePillTextActive: { color: Colors.white },
+  sourcePill: {
+    backgroundColor: Colors.surface, borderRadius: 20, paddingHorizontal: 14,
+    paddingVertical: 7, marginRight: 8, borderWidth: 1, borderColor: Colors.border,
+  },
+  sourcePillActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  sourcePillText: { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
+  sourcePillTextActive: { color: Colors.white },
   chipRow: { paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
   chip: {
     backgroundColor: Colors.surface, borderRadius: 20, paddingHorizontal: 14,
@@ -374,4 +580,16 @@ const styles = StyleSheet.create({
   deleteText: { color: Colors.danger, fontWeight: '600', fontSize: 15 },
   saveBtn: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: Colors.primary, alignItems: 'center' },
   saveText: { color: Colors.white, fontWeight: '700', fontSize: 15 },
+  archiveBtn: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.primary,
+    borderRadius: 16, padding: 16, gap: 16,
+  },
+  archiveText: { color: Colors.white, fontSize: 16, fontWeight: '700', marginBottom: 2 },
+  archiveSubText: { color: 'rgba(255,255,255,0.8)', fontSize: 12 },
+  permanentlyDeleteBtn: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,107,107,0.1)',
+    borderRadius: 16, padding: 16, gap: 16, borderWidth: 1, borderColor: 'rgba(255,107,107,0.3)',
+  },
+  permanentlyDeleteText: { color: Colors.danger, fontSize: 16, fontWeight: '700', marginBottom: 2 },
+  permanentlyDeleteSubText: { color: Colors.danger, opacity: 0.8, fontSize: 12 },
 });
