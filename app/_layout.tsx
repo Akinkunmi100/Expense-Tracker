@@ -5,6 +5,7 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { Colors } from '../constants/Colors';
+import { requestNotificationPermission, scheduleDailyReminder } from '../utils/notifications';
 
 export default function RootLayout() {
   const router = useRouter();
@@ -35,28 +36,34 @@ export default function RootLayout() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Request notification permission & schedule daily reminder once user is logged in
+  useEffect(() => {
+    if (session && profile) {
+      requestNotificationPermission().then((granted) => {
+        if (granted) scheduleDailyReminder(20, 0); // 8 PM daily reminder
+      });
+    }
+  }, [!!session, !!profile]);
+
   useEffect(() => {
     if (isLoading) return;
 
     const inAuthGroup = segments.length > 0 && segments[0] === '(auth)';
     const isProfileSetup = segments.length > 1 && segments[0] === '(auth)' && (segments as string[])[1] === 'profile-setup';
     const isOnboarding = segments.length > 0 && segments[0] === 'onboarding';
+    const isRoutineSetup = segments.length > 0 && segments[0] === 'routine-setup';
 
     if (!session && !inAuthGroup) {
       // Not signed in → redirect to login
       router.replace('/(auth)/login');
     } else if (session) {
       if (!profile && !isProfileSetup) {
-        // Signed in but no profile row yet (brand new user) → go to setup
         router.replace('/(auth)/profile-setup');
       } else if (profile && !profile.income_type && !isProfileSetup) {
-        // Signed in but profile incomplete → redirect to setup
         router.replace('/(auth)/profile-setup');
-      } else if (profile && profile.income_type && !profile.has_onboarded && !isOnboarding) {
-        // Signed in and profile complete, but not onboarded → redirect to onboarding
+      } else if (profile && profile.income_type && !profile.has_onboarded && !isOnboarding && !isRoutineSetup) {
         router.replace('/onboarding');
-      } else if (profile && profile.income_type && profile.has_onboarded && (inAuthGroup || isOnboarding)) {
-        // Signed in, complete, and onboarded → redirect to main app
+      } else if (profile && profile.income_type && profile.has_onboarded && (inAuthGroup || isOnboarding) && !isRoutineSetup) {
         router.replace('/(tabs)');
       }
     }

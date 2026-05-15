@@ -52,8 +52,8 @@ export default function OnboardingScreen() {
       // Refresh global profile store
       await fetchProfile(user.id);
       
-      // Navigate to tabs
-      router.replace('/(tabs)');
+      // Navigate to routine setup before main app
+      router.replace('/routine-setup');
     } catch (e: any) {
       if (Platform.OS === 'web') alert(e.message);
       else console.error(e.message);

@@ -22,6 +22,7 @@ import { supabase } from '../../lib/supabase';
 import MonoConnectButton from '../../components/MonoConnectButton';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { scheduleDailyReminder, cancelDailyReminder } from '../../utils/notifications';
 
 const showAlert = (title: string, msg: string) => {
   if (Platform.OS === 'web') {
@@ -449,6 +450,40 @@ export default function MoreScreen() {
             <Text style={styles.modeToggleSub}>
               Currently: {profile?.app_mode === 'business' ? '💼 Business' : '👤 Personal'}
             </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      {/* Notifications & Routines */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🔔 Notifications & Routines</Text>
+        {/* Daily reminder toggle */}
+        <TouchableOpacity
+          style={styles.modeToggleBtn}
+          onPress={async () => {
+            await scheduleDailyReminder(20, 0);
+            showAlert('Reminder Set ✅', 'You will get a daily reminder at 8:00 PM to log your expenses.');
+          }}
+        >
+          <View style={styles.modeToggleIcon}>
+            <Ionicons name="notifications-outline" size={20} color={Colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.modeToggleText}>Daily Spending Reminder</Text>
+            <Text style={styles.modeToggleSub}>Get reminded at 8 PM to log today's expenses</Text>
+          </View>
+        </TouchableOpacity>
+        {/* Re-visit routine setup */}
+        <TouchableOpacity
+          style={[styles.modeToggleBtn, { marginTop: 10 }]}
+          onPress={() => router.push('/routine-setup')}
+        >
+          <View style={styles.modeToggleIcon}>
+            <Ionicons name="repeat-outline" size={20} color={Colors.secondary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.modeToggleText}>Manage Routine Expenses</Text>
+            <Text style={styles.modeToggleSub}>Review or add your fixed monthly expenses</Text>
           </View>
         </TouchableOpacity>
       </View>

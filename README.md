@@ -132,6 +132,26 @@ EXPO_PUBLIC_MONO_PUBLIC_KEY=your-mono-public-key-here
 > - **Supabase keys**: [Supabase Dashboard](https://supabase.com) → Project Settings → API
 > - **Mono key**: [Mono Dashboard](https://app.withmono.com) → API Keys (optional — only needed for bank linking)
 
+---
+
+### 🔐 Project Credentials Recovery
+
+> [!IMPORTANT]
+> **The Supabase account for this project is registered with a Google/email account.**
+> If you forget which email you used, try the following:
+
+**Step 1 — Check your email inbox** for a message from `noreply@supabase.io` with subject "Confirm your email" or "Welcome to Supabase". This was sent when the account was first created.
+
+**Step 2 — Try signing in at [supabase.com](https://supabase.com)** with Google OAuth (the "Continue with Google" button). If the project was created via Google, this will log you in directly without needing a password or email.
+
+**Step 3 — If you still can't access it**, create a brand-new free Supabase project:
+1. Go to [supabase.com](https://supabase.com) → **New Project**
+2. Run the full SQL schema from the [Database Schema](#-database-schema) section below in the SQL Editor
+3. Copy your new **Project URL** and **anon key** into your `.env` file
+4. ⚠️ Note: existing user data from the old project will NOT transfer — only app code is needed
+
+---
+
 ### 4. Run the App
 
 ```bash
